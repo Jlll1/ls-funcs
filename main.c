@@ -9,6 +9,20 @@ TSLanguage *tree_sitter_c();
 #define TS_C_field_declarator 7
 #define TS_C_field_type 23
 
+char *
+get_node_text(TSNode node, char *source, uint32_t *contents_length)
+{
+  uint32_t start = ts_node_start_byte(node);
+  uint32_t end = ts_node_end_byte(node);
+  *contents_length = end - start + 1;
+  char *contents = calloc(1, *contents_length);
+  if (contents != NULL) {
+    strncpy(contents, &source[start], *contents_length - 1);
+  }
+
+  return contents;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -16,7 +30,7 @@ main(int argc, char *argv[])
   int32_t dirs_count = 0;
   char **dirs = malloc(dirs_size * sizeof(char*));
 
-  dirs[dirs_count++] = strdup(".");
+  dirs[dirs_count++] = strdup("./test");
 
   TSParser *tsparser = ts_parser_new();
   ts_parser_set_language(tsparser, tree_sitter_c());
@@ -87,24 +101,21 @@ main(int argc, char *argv[])
                     TSNode node = match.captures[i].node;
 
                     TSNode type = ts_node_child_by_field_id(node, TS_C_field_type);
-                    uint32_t type_start = ts_node_start_byte(type);
-                    uint32_t type_end = ts_node_end_byte(type);
-                    uint32_t type_length = type_end - type_start;
-                    char *type_text = calloc(1, type_length + 1);
+                    uint32_t type_text_length;
+                    char *type_text = get_node_text(type, contents, &type_text_length);
                     if (type_text != NULL) {
-                      strncpy(type_text, &contents[type_start], type_length);
                       printf("type: %s\n", type_text);
                     }
 
                     TSNode declarator = ts_node_child_by_field_id(node, TS_C_field_declarator);
-                    uint32_t declarator_start = ts_node_start_byte(declarator);
-                    uint32_t declarator_end = ts_node_end_byte(declarator);
-                    uint32_t declarator_length = declarator_end - declarator_start;
-                    char *declarator_text = calloc(1, declarator_length + 1);
+                    uint32_t declarator_text_length;
+                    char *declarator_text = get_node_text(declarator, contents, &declarator_text_length);
                     if (declarator_text != NULL) {
-                      strncpy(declarator_text, &contents[declarator_start], declarator_length);
                       printf("declarator: %s\n\n", declarator_text);
                     }
+
+                    free(type_text);
+                    free(declarator_text);
                   }
                 }
               }
