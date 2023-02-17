@@ -12,6 +12,7 @@ TSLanguage *tree_sitter_c();
 #define NUM_THREADS 6
 
 int32_t g_running = 1;
+TSQuery *g_query;
 
 char *
 get_node_text(TSNode node, char *source, uint32_t *contents_length)
@@ -27,6 +28,7 @@ get_node_text(TSNode node, char *source, uint32_t *contents_length)
   return contents;
 }
 
+
 void
 process_file(char *path)
 {
@@ -40,46 +42,39 @@ process_file(char *path)
     char *contents = calloc(1, file_size);
     if (contents != NULL) {
       fread(contents, sizeof(char), file_length, f);
-      char *query_text = "((function_definition) @func)";
 
       TSParser *tsparser = ts_parser_new();
       ts_parser_set_language(tsparser, tree_sitter_c());
       TSTree *tree = ts_parser_parse_string(tsparser, NULL, contents, file_length);
       TSNode root = ts_tree_root_node(tree);
 
-      uint32_t error_offset;
-      TSQueryError errorType;
-      TSQuery *query = ts_query_new(tree_sitter_c(), query_text, strlen(query_text), &error_offset, &errorType);
-      if (errorType == TSQueryErrorNone) {
-        TSQueryCursor *cursor = ts_query_cursor_new();
-        ts_query_cursor_exec(cursor, query, root);
+      TSQueryCursor *cursor = ts_query_cursor_new();
+      ts_query_cursor_exec(cursor, g_query, root);
 
-        TSQueryMatch match;
-        while(ts_query_cursor_next_match(cursor, &match)) {
-          for (int i = 0; i < match.capture_count; i++) {
-            TSNode node = match.captures[i].node;
+      TSQueryMatch match;
+      while(ts_query_cursor_next_match(cursor, &match)) {
+        for (int i = 0; i < match.capture_count; i++) {
+          TSNode node = match.captures[i].node;
 
-            TSNode type = ts_node_child_by_field_id(node, TS_C_field_type);
-            uint32_t type_text_length;
-            char *type_text = get_node_text(type, contents, &type_text_length);
-            if (type_text != NULL) {
-              printf("type: %s\n", type_text);
-            }
-
-            TSNode declarator = ts_node_child_by_field_id(node, TS_C_field_declarator);
-            uint32_t declarator_text_length;
-            char *declarator_text = get_node_text(declarator, contents, &declarator_text_length);
-            if (declarator_text != NULL) {
-              printf("declarator: %s\n\n", declarator_text);
-            }
-
-            free(type_text);
-            free(declarator_text);
+          TSNode type = ts_node_child_by_field_id(node, TS_C_field_type);
+          uint32_t type_text_length;
+          char *type_text = get_node_text(type, contents, &type_text_length);
+          if (type_text != NULL) {
+            printf("type: %s\n", type_text);
           }
+
+          TSNode declarator = ts_node_child_by_field_id(node, TS_C_field_declarator);
+          uint32_t declarator_text_length;
+          char *declarator_text = get_node_text(declarator, contents, &declarator_text_length);
+          if (declarator_text != NULL) {
+            printf("declarator: %s\n\n", declarator_text);
+          }
+
+          free(type_text);
+          free(declarator_text);
         }
       }
 
-      ts_query_delete(query);
       ts_tree_delete(tree);
       ts_parser_delete(tsparser);
     }
@@ -150,6 +145,14 @@ process_files_async(void *arg)
 int
 main(int argc, char *argv[])
 {
+  uint32_t error_offset;
+  TSQueryError errorType;
+  char *query_text = "((function_definition) @func)";
+  g_query = ts_query_new(tree_sitter_c(), query_text, strlen(query_text), &error_offset, &errorType);
+  if (errorType != TSQueryErrorNone) {
+    exit(1);
+  }
+
   int32_t dirs_size = 192;
   int32_t dirs_count = 0;
   char **dirs = calloc(1, dirs_size * sizeof(char*));
@@ -233,4 +236,6 @@ main(int argc, char *argv[])
       fprintf(stderr, "err: failed joining thread\n");
     }
   }
+
+  ts_query_delete(g_query);
 }
