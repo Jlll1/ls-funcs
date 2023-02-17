@@ -11,6 +11,8 @@ TSLanguage *tree_sitter_c();
 #define TS_C_field_type 23
 #define NUM_THREADS 6
 
+int32_t g_running = 1;
+
 char *
 get_node_text(TSNode node, char *source, uint32_t *contents_length)
 {
@@ -97,18 +99,46 @@ process_file(char *path)
 typedef struct {
   char **data;
   int32_t count;
+  int32_t size;
+  pthread_mutex_t lock;
 } FilesCollection;
 
-int32_t running = 1;
+void
+push_file(FilesCollection *fc, char *path)
+{
+  pthread_mutex_lock(&fc->lock);
+  if (fc->count + 1 > fc->size) {
+    fc->size *= 2;
+    fc->data = realloc(fc->data, fc->size * sizeof(char *));
+    if (fc->data == NULL) {
+      exit(1);
+    }
+  }
+  fc->data[fc->count++] = path;
+  pthread_mutex_unlock(&fc->lock);
+}
+
+char *
+pop_file(FilesCollection *fc)
+{
+  pthread_mutex_lock(&fc->lock);
+  char *data = NULL;
+  if (fc->count > 0) {
+    data = fc->data[--fc->count];
+  }
+  pthread_mutex_unlock(&fc->lock);
+
+  return data;
+}
 
 void *
 process_files_async(void *arg)
 {
   FilesCollection *files = (FilesCollection *)arg;
 
-  while (running) {
-    if (files->count > 0) {
-      char *path = files->data[--files->count];
+  while (g_running) {
+    char *path = pop_file(files);
+    if (path != NULL) {
       process_file(path);
       free(path);
     }
@@ -116,7 +146,6 @@ process_files_async(void *arg)
 
   pthread_exit(NULL);
 }
-
 
 int
 main(int argc, char *argv[])
@@ -129,12 +158,14 @@ main(int argc, char *argv[])
   }
   dirs[dirs_count++] = strdup(".");
 
-  int32_t files_size = 256;
-  char **fs = calloc(1, files_size * sizeof(char*));
-  if (fs == NULL) {
+  FilesCollection files;
+  files.count = 0;
+  files.size = 256;
+  files.data = calloc(1, files.size * sizeof(char*));
+  if (files.data == NULL) {
     exit(1);
   }
-  FilesCollection files = { fs, 0 };
+  pthread_mutex_init(&files.lock, NULL);
 
   pthread_t threads[NUM_THREADS];
   int err = 0;
@@ -183,15 +214,7 @@ main(int argc, char *argv[])
       else {
         char *ext = strrchr(fullPath, '.');
         if (ext != NULL && strcmp(ext, ".c") == 0) {
-          if (files.count + 1 > files_size) {
-            files_size *= 2;
-            files.data = realloc(files.data, files_size * sizeof(char *));
-            if (files.data == NULL) {
-              fprintf(stderr, "err: could not allocate memory for directories\n");
-              exit(1);
-            }
-          }
-          files.data[files.count++] = fullPath;
+          push_file(&files, fullPath);
         }
       }
     }
@@ -202,7 +225,7 @@ main(int argc, char *argv[])
 
   // wait for all files to be processed
   while (files.count > 0);
-  running = 0;
+  g_running = 0;
 
   for (int i = 0; i < NUM_THREADS; i++) {
     err = pthread_join(threads[i], NULL);
