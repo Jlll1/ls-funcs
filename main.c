@@ -28,67 +28,43 @@ get_node_text(TSNode node, char *source, uint32_t *contents_length)
   return contents;
 }
 
-
 void
-process_file(char *path)
+process_file(char *contents)
 {
-  FILE *f = fopen(path, "r");
-  if (f != NULL) {
-    fseek(f, 0, SEEK_END);
-    long file_length = ftell(f);
-    rewind(f);
+  TSParser *tsparser = ts_parser_new();
+  ts_parser_set_language(tsparser, tree_sitter_c());
+  TSTree *tree = ts_parser_parse_string(tsparser, NULL, contents, strlen(contents));
+  TSNode root = ts_tree_root_node(tree);
 
-    size_t file_size = (file_length * sizeof(char)) + 1;
-    char *contents = calloc(1, file_size);
-    if (contents != NULL) {
-      fread(contents, sizeof(char), file_length, f);
+  TSQueryCursor *cursor = ts_query_cursor_new();
+  ts_query_cursor_exec(cursor, g_query, root);
 
-      TSParser *tsparser = ts_parser_new();
-      ts_parser_set_language(tsparser, tree_sitter_c());
-      TSTree *tree = ts_parser_parse_string(tsparser, NULL, contents, file_length);
-      TSNode root = ts_tree_root_node(tree);
+  TSQueryMatch match;
+  while(ts_query_cursor_next_match(cursor, &match)) {
+    for (int i = 0; i < match.capture_count; i++) {
+      TSNode node = match.captures[i].node;
 
-      TSQueryCursor *cursor = ts_query_cursor_new();
-      ts_query_cursor_exec(cursor, g_query, root);
-
-      TSQueryMatch match;
-      while(ts_query_cursor_next_match(cursor, &match)) {
-        for (int i = 0; i < match.capture_count; i++) {
-          TSNode node = match.captures[i].node;
-
-          TSNode type = ts_node_child_by_field_id(node, TS_C_field_type);
-          uint32_t type_text_length;
-          char *type_text = get_node_text(type, contents, &type_text_length);
-          if (type_text != NULL) {
-            printf("type: %s\n", type_text);
-          }
-
-          TSNode declarator = ts_node_child_by_field_id(node, TS_C_field_declarator);
-          uint32_t declarator_text_length;
-          char *declarator_text = get_node_text(declarator, contents, &declarator_text_length);
-          if (declarator_text != NULL) {
-            printf("declarator: %s\n\n", declarator_text);
-          }
-
-          free(type_text);
-          free(declarator_text);
-        }
+      TSNode type = ts_node_child_by_field_id(node, TS_C_field_type);
+      uint32_t type_text_length;
+      char *type_text = get_node_text(type, contents, &type_text_length);
+      if (type_text != NULL) {
+        printf("type: %s\n", type_text);
       }
 
-      ts_tree_delete(tree);
-      ts_parser_delete(tsparser);
-    }
-    else {
-      fprintf(stderr, "err: could not allocate memory to read the file %s\n", path);
-    }
+      TSNode declarator = ts_node_child_by_field_id(node, TS_C_field_declarator);
+      uint32_t declarator_text_length;
+      char *declarator_text = get_node_text(declarator, contents, &declarator_text_length);
+      if (declarator_text != NULL) {
+        printf("declarator: %s\n\n", declarator_text);
+      }
 
-    free(contents);
-  }
-  else {
-    fprintf(stderr, "err: could not open file: %s\n", path);
+      free(type_text);
+      free(declarator_text);
+    }
   }
 
-  fclose(f);
+  ts_tree_delete(tree);
+  ts_parser_delete(tsparser);
 }
 
 typedef struct {
@@ -217,7 +193,27 @@ main(int argc, char *argv[])
       else {
         char *ext = strrchr(fullPath, '.');
         if (ext != NULL && strcmp(ext, ".c") == 0) {
-          push_file(&files, fullPath);
+          FILE *f = fopen(fullPath, "r");
+          if (f != NULL) {
+            fseek(f, 0, SEEK_END);
+            long file_length = ftell(f);
+            rewind(f);
+
+            size_t file_size = (file_length * sizeof(char)) + 1;
+            char *contents = calloc(1, file_size);
+            if (contents != NULL) {
+              fread(contents, file_size, 1, f);
+              push_file(&files, contents);
+              free(fullPath);
+            }
+            else {
+              fprintf(stderr, "err: could not allocate memory to read the file %s\n", path);
+            }
+            fclose(f);
+          }
+          else {
+            fprintf(stderr, "err: could not open file: %s\n", path);
+          }
         }
       }
     }
